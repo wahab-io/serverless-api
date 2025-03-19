@@ -1,0 +1,63 @@
+name: Deploy Serverless API
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          npm install -g aws-cdk
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          
+      - name: Deploy with CDK
+        run: |
+          cdk deploy --require-approval never
+          
+      - name: Get Lambda function name
+        id: lambda-info
+        run: |
+          LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name ServerlessApiStack --query "Stacks[0].Outputs[?OutputKey=='LambdaFunctionName'].OutputValue" --output text)
+          echo "LAMBDA_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
+          
+      - name: Create new Lambda version
+        run: |
+          VERSION=$(aws lambda publish-version --function-name $LAMBDA_NAME --description "Deployed from GitHub Actions" --query "Version" --output text)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          
+      - name: Update Lambda alias
+        run: |
+          aws lambda update-alias --function-name $LAMBDA_NAME --name live --function-version $VERSION
+          
+      - name: Create CodeDeploy deployment
+        run: |
+          aws deploy create-deployment \
+            --application-name ServerlessApiStack-ApiDeploymentGroupApplication \
+            --deployment-group-name ServerlessApiStack-ApiDeploymentGroup \
+            --revision "{\"revisionType\":\"AppSpecContent\",\"appSpecContent\":{\"content\":\"{\\\"version\\\":0.0,\\\"Resources\\\":[{\\\"MyLambdaFunction\\\":{\\\"Type\\\":\\\"AWS::Lambda::Function\\\",\\\"Properties\\\":{\\\"Name\\\":\\\"$LAMBDA_NAME\\\",\\\"Alias\\\":\\\"live\\\",\\\"CurrentVersion\\\":\\\"${{ env.VERSION }}\\\",\\\"TargetVersion\\\":\\\"${{ env.VERSION }}\\\"}}]}}\",\"sha256\":\"$(echo -n "{\"version\":0.0,\"Resources\":[{\"MyLambdaFunction\":{\"Type\":\"AWS::Lambda::Function\",\"Properties\":{\"Name\":\"$LAMBDA_NAME\",\"Alias\":\"live\",\"CurrentVersion\":\"${{ env.VERSION }}\",\"TargetVersion\":\"${{ env.VERSION }}\"}}}]}" | shasum -a 256 | cut -d ' ' -f 1)\"}}" \
+            --deployment-config-name CodeDeployDefault.LambdaAllAtOnce

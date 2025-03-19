@@ -1,0 +1,12 @@
+version: 0.0
+Resources:
+  - myLambdaFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        Name: !Ref LambdaFunctionName
+        Alias: live
+        CurrentVersion: !Ref CurrentVersion
+        TargetVersion: !Ref TargetVersion
+Hooks:
+  - BeforeAllowTraffic: !Ref BeforeAllowTrafficHook
+  - AfterAllowTraffic: !Ref AfterAllowTrafficHook
