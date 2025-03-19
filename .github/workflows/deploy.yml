@@ -57,7 +57,7 @@ jobs:
       - name: Create CodeDeploy deployment
         run: |
           aws deploy create-deployment \
-            --application-name ServerlessApiStack-ApiDeploymentGroupApplication \
-            --deployment-group-name ServerlessApiStack-ApiDeploymentGroup \
+            --application-name ServerlessApiStack-ApiDeploymentGroupApplicationCC13F493-W9j5PYciSNvA \
+            --deployment-group-name ServerlessApiStack-ApiDeploymentGroup97F2E15D-JQZVRMIMIGX \
             --revision "{\"revisionType\":\"AppSpecContent\",\"appSpecContent\":{\"content\":\"{\\\"version\\\":0.0,\\\"Resources\\\":[{\\\"MyLambdaFunction\\\":{\\\"Type\\\":\\\"AWS::Lambda::Function\\\",\\\"Properties\\\":{\\\"Name\\\":\\\"$LAMBDA_NAME\\\",\\\"Alias\\\":\\\"live\\\",\\\"CurrentVersion\\\":\\\"${{ env.VERSION }}\\\",\\\"TargetVersion\\\":\\\"${{ env.VERSION }}\\\"}}]}}\",\"sha256\":\"$(echo -n "{\"version\":0.0,\"Resources\":[{\"MyLambdaFunction\":{\"Type\":\"AWS::Lambda::Function\",\"Properties\":{\"Name\":\"$LAMBDA_NAME\",\"Alias\":\"live\",\"CurrentVersion\":\"${{ env.VERSION }}\",\"TargetVersion\":\"${{ env.VERSION }}\"}}}]}" | shasum -a 256 | cut -d ' ' -f 1)\"}}" \
             --deployment-config-name CodeDeployDefault.LambdaAllAtOnce
