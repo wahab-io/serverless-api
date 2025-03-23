@@ -1,0 +1,77 @@
+name: Lambda Function Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'lambda/**'  # Only trigger when files in the lambda directory change
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'lambda/**'  # Only trigger when files in the lambda directory change
+
+jobs:
+  deploy-lambda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      
+      - name: Get Lambda function name
+        id: lambda-info
+        run: |
+          LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name ServerlessApiStack --query "Stacks[0].Outputs[?OutputKey=='LambdaFunctionName'].OutputValue" --output text)
+          APPLICATION_NAME=$(aws cloudformation describe-stacks --stack-name ServerlessApiStack --query "Stacks[0].Outputs[?OutputKey=='ApplicationName'].OutputValue" --output text)
+          DEPLOYMENT_GROUP_NAME=$(aws cloudformation describe-stacks --stack-name ServerlessApiStack --query "Stacks[0].Outputs[?OutputKey=='DeploymentGroupName'].OutputValue" --output text)
+          BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name ServerlessApiStack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucket'].OutputValue" --output text)
+          echo "LAMBDA_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
+          echo "APPLICATION_NAME=$APPLICATION_NAME" >>$GITHUB_ENV
+          echo "DEPLOYMENT_GROUP_NAME=$DEPLOYMENT_GROUP_NAME" >>$GITHUB_ENV
+          echo "BUCKET_NAME=$BUCKET_NAME" >>$GITHUB_ENV
+
+      - name: Get the lambda current version for an alias
+        run: |
+          CURRENT_VERSION=$(aws lambda get-alias --function-name $LAMBDA_NAME --name live --query "FunctionVersion" --output text)
+          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          
+      - name: Package Lambda function
+        run: |
+          cd lambda
+          zip -r ../function.zip .
+          
+      - name: Update Lambda function code
+        run: |
+          TARGET_VERSION=$(aws lambda update-function-code --function-name $LAMBDA_NAME --zip-file fileb://function.zip --publish --query "Version" --output text)
+          echo "TARGET_VERSION=$TARGET_VERSION" >> $GITHUB_ENV
+
+      - name: Generate AppSpec.json file based on Current and Target versions
+        run : |
+          sed -i "s/!FUNCTION_NAME!/$LAMBDA_NAME/g" appspec.json
+          sed -i "s/!CURRENT_VERSION!/$CURRENT_VERSION/g" appspec.json
+          sed -i "s/!TARGET_VERSION!/$TARGET_VERSION/g" appspec.json
+          cat appspec.json
+
+      - name: Push appspec.json to S3
+        run: |
+          aws s3 cp appspec.json s3://$BUCKET_NAME/deployments/${{ github.sha }}/appspec.json
+
+
+      - name: Create CodeDeploy deployment
+        run: |
+          aws deploy create-deployment \
+            --application-name $APPLICATION_NAME \
+            --deployment-group-name $DEPLOYMENT_GROUP_NAME \
+            --revision "{\"revisionType\":\"S3\",\"s3Location\":{\"bucket\":\"$BUCKET_NAME\",\"key\":\"deployments/${{ github.sha }}/appspec.json\",\"bundleType\":\"JSON\"}}" \
+            --deployment-config-name CodeDeployDefault.LambdaAllAtOnce
